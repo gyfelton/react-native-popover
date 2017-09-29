@@ -62,18 +62,24 @@ var Popover = React.createClass({
     };
   },
   measureContent(x) {
-    var {width, height} = x.nativeEvent.layout;
-    var contentSize = {width, height};
-    var geom = this.computeGeometry({contentSize});
-
+    var { width, height } = x.nativeEvent.layout;
+    var contentSize = { width, height };
+    let result = this.computeGeometry({ contentSize });
+    let geom = result.geom;
+    let placement = result.placement;
     var isAwaitingShow = this.state.isAwaitingShow;
-    this.setState(Object.assign(geom,
-      {contentSize, isAwaitingShow: undefined}), () => {
-      // Once state is set, call the showHandler so it can access all the geometry
-      // from the state
-      isAwaitingShow && this._startAnimation({show: true});
-    });
+    this.setState(
+        Object.assign(geom, { contentSize, isAwaitingShow: undefined }),
+        () => {
+            // Once state is set, call the showHandler so it can access all the geometry
+            // from the state
+            isAwaitingShow && this._startAnimation({ show: true });
+        }
+    );
+    this.setState({ placement });
   },
+  // This method will return a {placement, geom} tuple
+  // where the placement is the correct one (not "auto") after trying out all options
   computeGeometry({contentSize, placement}) {
     placement = placement || this.props.placement;
 
@@ -85,16 +91,29 @@ var Popover = React.createClass({
     }
 
     switch (placement) {
-      case 'top':
-        return this.computeTopGeometry(options);
-      case 'bottom':
-        return this.computeBottomGeometry(options);
-      case 'left':
-        return this.computeLeftGeometry(options);
-      case 'right':
-        return this.computeRightGeometry(options);
+      case "top":
+          return {
+              placement: "top",
+              geom: this.computeTopGeometry(options)
+          };
+      case "bottom":
+          return {
+              placement: "bottom",
+              geom: this.computeBottomGeometry(options)
+          };
+      case "left":
+          return {
+              placement: "left",
+              geom: this.computeLeftGeometry(options)
+          };
+      case "right":
+          return {
+              placement: "right",
+              geom: this.computeRightGeometry(options)
+          };
       default:
-        return this.computeAutoGeometry(options);
+          // Because this method itself return the tuple we want
+          return this.computeAutoGeometry(options);
     }
   },
   computeTopGeometry({displayArea, fromRect, contentSize, arrowSize}) {
@@ -147,24 +166,31 @@ var Popover = React.createClass({
       placement: 'right',
     }
   },
-  computeAutoGeometry({displayArea, contentSize}) {
-    var placementsToTry = ['left', 'right', 'bottom', 'top'];
+  computeAutoGeometry({ displayArea, contentSize }) {
+    var placementsToTry = ["left", "right", "bottom", "top"];
 
+    var placement = placementsToTry[0];
     for (var i = 0; i < placementsToTry.length; i++) {
-      var placement = placementsToTry[i];
-      var geom = this.computeGeometry({contentSize: contentSize, placement: placement});
-      var {popoverOrigin} = geom;
+        placement = placementsToTry[i];
+        var geom = this.computeGeometry({
+            contentSize: contentSize,
+            placement: placement
+        }).geom;
+        var { popoverOrigin } = geom;
 
-      if (popoverOrigin.x >= displayArea.x
-          && popoverOrigin.x <= displayArea.x + displayArea.width - contentSize.width
-          && popoverOrigin.y >= displayArea.y
-          && popoverOrigin.y <= displayArea.y + displayArea.height - contentSize.height) {
-        break;
-      }
+        if (
+            popoverOrigin.x >= displayArea.x &&
+            popoverOrigin.x <=
+                displayArea.x + displayArea.width - contentSize.width &&
+            popoverOrigin.y >= displayArea.y &&
+            popoverOrigin.y <=
+                displayArea.y + displayArea.height - contentSize.height
+        ) {
+            break;
+        }
     }
-
-    return geom;
-  },
+    return { placement, geom };
+},
   getArrowSize(placement) {
     var size = this.props.arrowSize;
     switch(placement) {
@@ -190,7 +216,7 @@ var Popover = React.createClass({
         return '0deg';
     }
   },
-  getArrowDynamicStyle() {
+  getArrowDynamicStyle(placement) {
     var {anchorPoint, popoverOrigin} = this.state;
     var arrowSize = this.props.arrowSize;
 
@@ -200,10 +226,17 @@ var Popover = React.createClass({
     // to fix a visual artifact when the popover is animated with a scale
     var width = arrowSize.width + 2;
     var height = arrowSize.height * 2 + 2;
-
+    var marginTop = 0.0;
+    var marginLeft = 0.0;
+    // Add a margin and only for bottom and right because it will drawn outside the display area otherwise
+    if (placement == "bottom") {
+        marginTop = arrowSize.height;
+    } else if (placement == "right") {
+        marginLeft = arrowSize.width;
+    }
     return {
-      left: anchorPoint.x - popoverOrigin.x - width / 2,
-      top: anchorPoint.y - popoverOrigin.y - height / 2,
+      left: anchorPoint.x - popoverOrigin.x - width / 2 + marginLeft,
+      top: anchorPoint.y - popoverOrigin.y - height / 2 + marginTop,
       width: width,
       height: height,
       borderTopWidth: height / 2,
@@ -333,7 +366,7 @@ var Popover = React.createClass({
     var contentStyle = [styles.content, ...extendedStyles.content];
     var arrowColor = StyleSheet.flatten(contentStyle).backgroundColor;
     var arrowColorStyle = this.getArrowColorStyle(arrowColor);
-    var arrowDynamicStyle = this.getArrowDynamicStyle();
+    var arrowDynamicStyle = this.getArrowDynamicStyle(placement);
     var contentSizeAvailable = this.state.contentSize.width;
 
     // Special case, force the arrow rotation even if it was overriden
@@ -342,6 +375,18 @@ var Popover = React.createClass({
     arrowTransform.unshift({rotate: this.getArrowRotation(placement)});
     arrowStyle = [...arrowStyle, {transform: arrowTransform}];
 
+    // Increase popover area to reveal arrow on Android
+    let extraRoomForArrow = {};
+    if (placement == "bottom") {
+        extraRoomForArrow = { paddingTop: this.props.arrowSize.height };
+    } else if (placement == "top") {
+        extraRoomForArrow = { paddingBottom: this.props.arrowSize.height };
+    } else if (placement == "right") {
+        extraRoomForArrow = { paddingLeft: this.props.arrowSize.height };
+    } else if (placement == "left") {
+        extraRoomForArrow = { paddingRight: this.props.arrowSize.height };
+    }
+
     return (
       <TouchableWithoutFeedback onPress={this.props.onClose}>
         <View style={[styles.container, contentSizeAvailable && styles.containerVisible ]}>
@@ -349,7 +394,8 @@ var Popover = React.createClass({
           <Animated.View style={[styles.popover, {
             top: popoverOrigin.y,
             left: popoverOrigin.x,
-            }, ...extendedStyles.popover]}>
+            }, ...extendedStyles.popover,
+            extraRoomForArrow]}>
             <Animated.View style={arrowStyle}/>
             <Animated.View ref='content' onLayout={this.measureContent} style={contentStyle}>
               {this.props.children}
